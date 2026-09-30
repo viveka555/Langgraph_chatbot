@@ -7,14 +7,20 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
-# Load environment variables
+
+# =====================================================
+# Load Environment Variables
+# =====================================================
+
 load_dotenv()
+
 
 # =====================================================
 # Project Root
 # =====================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
 
 # =====================================================
 # Folder Paths
@@ -24,16 +30,18 @@ DATABASE_DIR = BASE_DIR / "database"
 DOCUMENTS_DIR = BASE_DIR / "documents"
 CHROMA_DIR = DATABASE_DIR / "chroma"
 
-# Create folders automatically
+# Create required folders automatically
 DATABASE_DIR.mkdir(parents=True, exist_ok=True)
 DOCUMENTS_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
+
 # =====================================================
-# SQLite
+# SQLite Database
 # =====================================================
 
 SQLITE_DB = DATABASE_DIR / "chat.db"
+
 
 # =====================================================
 # Model Configuration
@@ -41,13 +49,14 @@ SQLITE_DB = DATABASE_DIR / "chat.db"
 
 LLM_MODEL = os.getenv(
     "LLM_MODEL",
-    "openai/gpt-oss-20b"
+    "openai/gpt-oss-20b",
 )
 
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL",
-    "BAAI/bge-small-en-v1.5"
+    "BAAI/bge-small-en-v1.5",
 )
+
 
 # =====================================================
 # API Keys
@@ -56,8 +65,9 @@ EMBEDDING_MODEL = os.getenv(
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 ALPHA_VANTAGE_API_KEY = os.getenv(
-    "ALPHA_VANTAGE_API_KEY"
+    "ALPHA_VANTAGE_API_KEY",
 )
+
 
 # =====================================================
 # RAG Configuration
@@ -67,7 +77,7 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 
 TOP_K_RESULTS = 10
-DOCUMENTS_DIR = Path("documents")
+
 
 # =====================================================
 # Chat Configuration
@@ -77,23 +87,47 @@ DEFAULT_CHAT_TITLE = "New Chat"
 
 MAX_CHAT_TITLE_LENGTH = 25
 
-PLANNER_PROMPT = """You are a routing agent.
 
-Return ONLY valid JSON.
+# =====================================================
+# LLM Context Configuration
+# =====================================================
 
-Schema:
+# Maximum approximate token budget allocated to
+# recent conversation messages.
+MAX_CONTEXT_TOKENS = 3000
+
+
+# =====================================================
+# Planner Configuration
+# =====================================================
+
+PLANNER_PROMPT = """
+You are a routing agent.
+
+Decide whether the user's request requires a tool.
+
+Use:
+- "tool" for calculations, current/external information,
+  uploaded documents, or other tool-supported tasks.
+- "direct" for normal conversation and questions that
+  do not require tools.
+
+Return ONLY structured output matching this schema:
+
 {
-  "route": "tool" | "direct",
-  "reason": "short explanation"
+    "route": "tool" | "direct"
 }
 
 Important:
 - route must be a STRING.
-- Never return an array like ["direct"]."""
+- Never return an array.
+- Do not select a specific tool.
+"""
 
-# -----------------------------------------------------
+
+# =====================================================
 # Environment Validation
-# -----------------------------------------------------
+# =====================================================
 
 if not GROQ_API_KEY:
     raise ValueError(
