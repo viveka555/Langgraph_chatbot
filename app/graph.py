@@ -11,10 +11,17 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from app.config import SQLITE_DB, PLANNER_PROMPT
+from app.config import SQLITE_DB, PLANNER_PROMPT, MAX_CONTEXT_TOKENS
 from app.llm import llm
 from app.tools import tools
 from app.schema import PlannerDecision
+from app.memory import summarize_conversation, trim_messages, build_context
+from app.semantic_memory import (
+    extract_memories,
+    store_memories,
+    retrieve_memories,
+)
+
 # =====================================================
 # Graph State
 # Shared memory available to every node
@@ -29,6 +36,11 @@ class ChatState(TypedDict):
 
     # Planner decision
     route: str
+
+    #summary 
+    summary: str
+
+    memories: list[str]
 
 
 # =====================================================
@@ -65,6 +77,46 @@ def planner_node(state: ChatState):
     return {
         "route": route
     }
+
+# =====================================================
+# Memory Node
+# Responsibility:
+# 
+# =====================================================
+def memory_node(state: ChatState, config):
+
+    messages = state["messages"]
+
+    thread_id = config["configurable"]["thread_id"]
+
+    summary = state.get("summary", "")
+
+    # Summarize long conversations
+    if len(messages) > 40:
+
+        summary = summarize_conversation(messages)
+
+        facts = extract_memories(messages)
+
+        store_memories(
+            memories=facts,
+            thread_id=thread_id,
+        )
+
+    # Retrieve only relevant memories
+    query = messages[-1].content
+
+    memories = retrieve_memories(
+        query=query,
+        thread_id=thread_id,
+        top_k=3,
+    )
+
+    return {
+        "summary": summary,
+        "memories": memories,
+    }
+
 # =====================================================
 # Assistant Node
 # Responsibility:
@@ -73,11 +125,30 @@ def planner_node(state: ChatState):
 
 def assistant_node(state: ChatState):
 
-    response = llm_with_tools.invoke(state["messages"])
+    summary = state.get("summary", "")
+
+    memories = state.get("memories", [])
+
+    memory_text = "\n".join(
+        f"- {item}" for item in memories
+    )
+
+    recent = trim_messages(
+        messages=state["messages"],
+        max_tokens=MAX_CONTEXT_TOKENS,
+    )
+
+    context = build_context(
+        summary=summary,
+        memories=memory_text,
+        recent_messages=recent,
+    )
+
+    response = llm_with_tools.invoke(context)
 
     return {
         "messages": [response],
-        "title": state["title"]
+        "title": state["title"],
     }
 
 
@@ -93,7 +164,13 @@ def route_decision(state: ChatState):
 
     return "assistant"
 
-#Actually, in production you can even remove this routing and always go to Assistant.
+#Actually, in prorecent = trim_messages(messages=state["messges"],max_tokens=2380,)
+
+    context = build_context(
+    summary,
+    recent_messages,
+)
+#production you can even remove this routing and always go to Assistant.
 # The planner exists for observability (logging, analytics, tracing).
 
 # =====================================================
@@ -102,31 +179,53 @@ def route_decision(state: ChatState):
 
 builder = StateGraph(ChatState)
 
+# =====================================================
 # Nodes
+# =====================================================
+
 builder.add_node("planner", planner_node)
+builder.add_node("memory", memory_node)
 builder.add_node("assistant", assistant_node)
 builder.add_node("tools", ToolNode(tools))
 
+# =====================================================
 # Start
+# =====================================================
+
 builder.add_edge(START, "planner")
 
-# Planner routing
+# =====================================================
+# Planner → Memory
+# =====================================================
+
 builder.add_conditional_edges(
     "planner",
     route_decision,
     {
-        "assistant": "assistant",
-        
+        "assistant": "memory",
+        END: END,
     },
 )
 
-# Assistant → ToolNode (only if tool calls exist)
+# =====================================================
+# Memory → Assistant
+# =====================================================
+
+builder.add_edge("memory", "assistant")
+
+# =====================================================
+# Assistant → ToolNode (only if tool call exists)
+# =====================================================
+
 builder.add_conditional_edges(
     "assistant",
     tools_condition,
 )
-builder.add_edge("assistant", END)
-# Tool execution → Assistant
+
+# =====================================================
+# ToolNode → Assistant
+# =====================================================
+
 builder.add_edge("tools", "assistant")
 
 
